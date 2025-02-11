@@ -1,45 +1,46 @@
-const express = require('express');
-const axios = require('axios');
+const express = require("express");
+const axios = require("axios");
+const cheerio = require("cheerio");
+const cors = require("cors");
+
 const app = express();
-const port = 3000;
+app.use(cors()); // Enable cross-origin requests
+app.use(express.static("public")); // Serve static files from "public" directory
 
-app.use(express.json());
+// Define a route to extract the M3U8 link
+app.get("/extract", async (req, res) => {
+    const { url } = req.query;  // Extract the "url" query parameter from the request
+    if (!url) return res.json({ error: "No URL provided" });  // If no URL is provided, send an error response
 
-app.post('/download', async (req, res) => {
-  const { url } = req.body;
+    try {
+        // Fetch the TeraBox page using axios
+        const response = await axios.get(url, { headers: { "User-Agent": "Mozilla/5.0" } });
+        
+        // Load the HTML content into Cheerio to parse it
+        const $ = cheerio.load(response.data);
 
-  if (!url) {
-    return res.status(400).json({ error: 'URL is required' });
-  }
+        // Look for the M3U8 link inside <script> tags in the page's HTML
+        const scriptTags = $("script").map((i, el) => $(el).html()).get();
+        let m3u8Link = null;
 
-  try {
-    // Validate and parse the URL
-    const parsedUrl = new URL(url);
-    const params = new URLSearchParams(parsedUrl.search);
+        // Check if any of the script tags contain the M3U8 link
+        scriptTags.forEach((script) => {
+            if (script.includes("extstreaming.m3u8")) {
+                const match = script.match(/"(https?:\/\/[^"]+extstreaming\.m3u8[^"]+)"/);  // Extract M3U8 URL using regex
+                if (match) m3u8Link = match[1];
+            }
+        });
 
-    // Check required parameters
-    if (!params.has('uk') || !params.has('shareid') || !params.has('fid')) {
-      return res.status(400).json({ error: 'Invalid URL parameters' });
+        // If a M3U8 link is found, send it in the response; otherwise, send an error
+        if (m3u8Link) {
+            res.json({ m3u8: decodeURIComponent(m3u8Link) });  // Send the decoded M3U8 link
+        } else {
+            res.json({ error: "M3U8 link not found" });  // Send error if M3U8 link not found
+        }
+    } catch (err) {
+        res.json({ error: "Failed to fetch data" });  // Catch any errors and send a failure response
     }
-
-    // Generate the download link
-    const downloadUrl = generateDownloadLink(params);
-    const response = await axios.get(downloadUrl, { responseType: 'stream' });
-
-    // Pipe the response to the client
-    response.data.pipe(res);
-  } catch (error) {
-    console.error(error);
-    res.status(500).json({ error: 'Failed to download the file' });
-  }
 });
 
-function generateDownloadLink(params) {
-  // Generate the download link based on the parameters
-  // This is a simplified example, you may need to handle encryption, tokens, etc.
-  return `https://www.1024terabox.com/share/extstreaming.m3u8?${params.toString()}`;
-}
-
-app.listen(port, () => {
-  console.log(`Server is running at http://localhost:${port}`);
-});
+// Start the Express server and listen on port 3000
+app.listen(3000, () => console.log("Server running on http://localhost:3000"));
